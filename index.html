@@ -45,6 +45,7 @@
   .cal td.hol .note, .cal td.none .note { font-size:.8rem; color:#9a5a20; font-style:italic; }
   .cal td.none .note { color:var(--muted); }
   .scroll { overflow-x:auto; }
+  .legend { margin:8px 0 0; color:#7a3d00; }
   .matrix td, .matrix th { text-align:center; padding:4px 6px; font-size:.85rem; white-space:nowrap; }
   .matrix td.self { background:#e9edf2; }
   .matrix td.zero { color:#c0392b; font-weight:700; }
@@ -68,7 +69,7 @@
 <body>
 <header>
   <h1>League Game Schedule Maker</h1>
-  <p>Monday&ndash;Thursday play days &bull; one game sequence per day &bull; each team plays once a week</p>
+  <p>Monday&ndash;Thursday play days &bull; one game sequence per day</p>
 </header>
 <main>
   <section class="card" id="setup">
@@ -85,6 +86,10 @@
     <div style="margin-top:14px">
       <label for="blackouts">Other days off <span class="hint">(optional &ndash; one date per line, like 2026-10-31. US federal holidays are skipped automatically.)</span></label>
       <textarea id="blackouts" placeholder="Example:&#10;2026-10-31&#10;2026-11-27"></textarea>
+    </div>
+    <div style="margin-top:14px">
+      <label style="font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="repeats" style="width:auto;margin:0"> Allow teams to play more than once a week</label>
+      <div class="hint" style="margin-left:26px">Off: each team plays only one day a week. On: every Monday&ndash;Thursday gets a full game, and a team playing a 2nd time that week is marked with *.</div>
     </div>
     <div class="buttons">
       <button class="primary" id="gen">Make schedule</button>
@@ -179,8 +184,9 @@ var Scheduler = (function () {
     if (errors.length) return { errors: errors };
 
     var hol = holidaysBetween(start, end);
-    var played = [], waits = [], last = [], met = [], dowCount = [];
-    for (var i = 0; i < N; i++) { played.push(0); waits.push(0); last.push(-1); met.push(new Array(N).fill(0)); dowCount.push([0, 0, 0, 0, 0, 0, 0]); }
+    var allowRepeats = !!opts.allowRepeats;
+    var played = [], waits = [], last = [], met = [], dowCount = [], extra = [];
+    for (var i = 0; i < N; i++) { played.push(0); extra.push(0); waits.push(0); last.push(-1); met.push(new Array(N).fill(0)); dowCount.push([0, 0, 0, 0, 0, 0, 0]); }
     var games = [], skipped = [];
 
     // Walk week by week (Monday to Sunday)
@@ -201,7 +207,7 @@ var Scheduler = (function () {
       var p = Math.min(N, 3 * days.length);
       var g = Math.ceil(p / 3);
       var sizes = []; for (var s = 0; s < g; s++) sizes.push(2);
-      for (var extra = p - 2 * g, s2 = 0; extra > 0; extra--, s2++) sizes[s2]++; // 3s first
+      for (var spare = p - 2 * g, s2 = 0; spare > 0; spare--, s2++) sizes[s2]++; // 3s first
       // 1) Pick who plays this week: fewest games first, then whoever has waited longest.
       var order0 = []; for (var t0 = 0; t0 < N; t0++) order0.push(t0);
       order0.sort(function (a, b) { return played[a] - played[b] || last[a] - last[b] || a - b; });
@@ -235,8 +241,28 @@ var Scheduler = (function () {
         dayOf[di] = freeGroups.splice(bi, 1)[0];
       }
 
+      // Option ON: count planned appearances this week so fill-ins go to teams playing least.
+      var planned = new Array(N).fill(0), weekCount = new Array(N).fill(0);
+      sel.forEach(function (t) { planned[t] = 1; });
+      var perDay = Math.min(3, N);
+
       days.forEach(function (d, di) {
         var key = fmt(d), dow = DAY_NAMES[d.getUTCDay()], best = dayOf[di];
+        if (allowRepeats && (!best || best.length < perDay)) {
+          // Fill the open spots with extra (repeat) teams: fewest games this week, then fewest
+          // games overall, then least-met pairs, then longest since last played.
+          var have = best ? best.slice() : [], need = perDay - have.length;
+          var cands = []; for (var t1 = 0; t1 < N; t1++) if (have.indexOf(t1) < 0) cands.push(t1);
+          var fb = null, fs = null;
+          combos(cands, need).forEach(function (c) {
+            var full = have.concat(c), wk = 0, pl = 0, ls = 0;
+            c.forEach(function (t) { wk += planned[t]; pl += played[t]; ls += last[t]; });
+            var sc = [wk, pl, groupCost(full), ls];
+            if (!fs || less(sc, fs)) { fs = sc; fb = full; }
+          });
+          fb.forEach(function (t) { if (have.indexOf(t) < 0) planned[t]++; });
+          best = fb;
+        }
         if (!best) { skipped.push({ date: key, dow: dow, reason: 'No game needed (all teams already play this week)' }); return; }
         if (best.length < 2) { skipped.push({ date: key, dow: dow, reason: 'Fewer than 2 teams available' }); return; }
 
@@ -252,30 +278,36 @@ var Scheduler = (function () {
           }
           order = bestO; waits[order[2]]++;
         }
+        var repeat = order.map(function (t) { return weekCount[t] > 0; });
         for (var a2 = 0; a2 < order.length; a2++) {
-          played[order[a2]]++; last[order[a2]] = weekNo; dowCount[order[a2]][d.getUTCDay()]++;
+          if (repeat[a2]) extra[order[a2]]++;
+          weekCount[order[a2]]++; played[order[a2]]++; last[order[a2]] = weekNo; dowCount[order[a2]][d.getUTCDay()]++;
           for (var b2 = a2 + 1; b2 < order.length; b2++) { met[order[a2]][order[b2]]++; met[order[b2]][order[a2]]++; }
         }
-        games.push({ date: key, dow: dow, week: weekNo, teams: order });
+        games.push({ date: key, dow: dow, week: weekNo, teams: order, repeat: repeat });
       });
     }
     skipped.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-    return { errors: [], games: games, skipped: skipped, played: played, waits: waits, met: met, names: names };
+    return { errors: [], games: games, skipped: skipped, played: played, extra: extra, allowRepeats: allowRepeats, waits: waits, met: met, names: names };
   }
   function less(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] < b[i]; } return false; }
 
-  function describe(teamIdx, names) {
-    var n = teamIdx.map(function (i) { return names[i]; });
+  var LEGEND = '* = team is playing more than once this week';
+  function labels(teamIdx, names, repeat) { return teamIdx.map(function (i, k) { return names[i] + (repeat && repeat[k] ? '*' : ''); }); }
+  function hasRepeats(result) { return result.games.some(function (g) { return g.repeat && g.repeat.indexOf(true) >= 0; }); }
+  function describe(teamIdx, names, repeat) {
+    var n = labels(teamIdx, names, repeat);
     return n.length === 3 ? n[0] + ' vs ' + n[1] + ', winner vs ' + n[2] : n[0] + ' vs ' + n[1];
   }
   function csvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
   function toCSV(result) {
     var rows = [['Day of Week', 'Date', 'Team 1', 'Team 2', 'Team 3']];
-    result.games.forEach(function (g) { rows.push([g.dow, g.date].concat(g.teams.map(function (i) { return result.names[i]; })).concat(g.teams.length < 3 ? [''] : [])); });
+    result.games.forEach(function (g) { rows.push([g.dow, g.date].concat(labels(g.teams, result.names, g.repeat)).concat(g.teams.length < 3 ? [''] : [])); });
+    if (result.allowRepeats || hasRepeats(result)) { rows.push([]); rows.push([LEGEND]); }
     return rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
   }
 
-  return { generate: generate, describe: describe, toCSV: toCSV, federalHolidays: federalHolidays,
+  return { generate: generate, describe: describe, labels: labels, hasRepeats: hasRepeats, LEGEND: LEGEND, toCSV: toCSV, federalHolidays: federalHolidays,
            parse: parse, fmt: fmt, addDays: addDays, DAY_NAMES: DAY_NAMES, MONTHS: MONTHS };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = Scheduler;
@@ -311,7 +343,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Scheduler;
     var names = [], seen = {};
     $('teams').querySelectorAll('input').forEach(function (inp, i) {
       var v = inp.value.trim() || 'Team ' + (i + 1); if (seen[v]) v = v + ' (' + (i + 1) + ')'; seen[v] = 1; names.push(v); });
-    var res = Scheduler.generate({ start: $('start').value, end: $('end').value, teams: names.slice(0, n),
+    var res = Scheduler.generate({ start: $('start').value, end: $('end').value, teams: names.slice(0, n), allowRepeats: $('repeats').checked,
       blackouts: $('blackouts').value.split(/\r?\n/) });
     if (res.errors.length) { showMsg(res.errors.map(esc).join('<br>'), 'err'); return; }
     lastResult = res;
@@ -349,7 +381,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Scheduler;
           if (d.getUTCMonth() !== m) { row += '<td class="out"></td>'; continue; }
           any = true;
           var inSeason = d >= start && d <= end, cell = '<div class="date">' + Scheduler.DAY_NAMES[d.getUTCDay()].slice(0, 3) + ' ' + (m + 1) + '/' + d.getUTCDate() + '</div>';
-          if (gameBy[key]) row += '<td>' + cell + '<div class="game">' + gameHtml(gameBy[key].teams, names) + '</div></td>';
+          if (gameBy[key]) row += '<td>' + cell + '<div class="game">' + gameHtml(gameBy[key].teams, names, gameBy[key].repeat) + '</div></td>';
           else if (skipBy[key] && !/No game|Fewer/.test(skipBy[key].reason)) row += '<td class="hol">' + cell + '<div class="note">' + esc(skipBy[key].reason) + '</div></td>';
           else if (inSeason) row += '<td class="none">' + cell + '<div class="note">No game</div></td>';
           else row += '<td class="out">' + cell + '</td>';
@@ -359,16 +391,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Scheduler;
       html += '</tbody></table></div>';
       cur = new Date(Date.UTC(y, m + 1, 1));
     }
-    $('v-cal').innerHTML = html;
+    var legend = (res.allowRepeats || Scheduler.hasRepeats(res)) ? '<p class="legend"><b>' + esc(Scheduler.LEGEND) + '</b></p>' : '';
+    $('v-cal').innerHTML = html + legend;
 
     // List
     var list = '<div class="scroll"><table><thead><tr><th>Day</th><th>Date</th><th>Game sequence</th></tr></thead><tbody>';
-    res.games.forEach(function (g) { list += '<tr><td>' + g.dow + '</td><td>' + niceDate(g.date) + '</td><td>' + esc(Scheduler.describe(g.teams, names)) + '</td></tr>'; });
-    $('v-list').innerHTML = list + '</tbody></table></div>';
+    res.games.forEach(function (g) { list += '<tr><td>' + g.dow + '</td><td>' + niceDate(g.date) + '</td><td>' + esc(Scheduler.describe(g.teams, names, g.repeat)) + '</td></tr>'; });
+    $('v-list').innerHTML = list + '</tbody></table></div>' + legend;
 
     // Summary
-    var sum = '<h3>Games per team</h3><div class="scroll"><table><thead><tr><th>Team</th><th>Game days</th><th>Times waiting for the winner (3rd spot)</th></tr></thead><tbody>';
-    names.forEach(function (n, i) { sum += '<tr><td>' + esc(n) + '</td><td>' + res.played[i] + '</td><td>' + res.waits[i] + '</td></tr>'; });
+    var sum = '<h3>Games per team</h3><div class="scroll"><table><thead><tr><th>Team</th><th>Game days</th><th>Times waiting for the winner (3rd spot)</th><th>Extra games (*)</th></tr></thead><tbody>';
+    names.forEach(function (n, i) { sum += '<tr><td>' + esc(n) + '</td><td>' + res.played[i] + '</td><td>' + res.waits[i] + '</td><td>' + res.extra[i] + '</td></tr>'; });
     sum += '</tbody></table></div><h3 style="margin-top:18px">Matchups</h3><p class="hint">How many times each pair of teams is scheduled in the same game sequence. Red 0 = never scheduled together.</p><div class="scroll"><table class="matrix"><thead><tr><th></th>';
     names.forEach(function (n, i) { sum += '<th title="' + esc(n) + '">' + (i + 1) + '</th>'; });
     sum += '</tr></thead><tbody>';
@@ -387,8 +420,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Scheduler;
     if (other.length) sk += '<h3 style="margin-top:16px">Play days with no game</h3><p class="hint">Every team already had its one game that week, so no game was needed.</p><ul class="skips">' + other.map(function (s) { return '<li>' + s.dow + ', ' + niceDate(s.date) + '</li>'; }).join('') + '</ul>';
     $('v-skip').innerHTML = sk;
   }
-  function gameHtml(t, names) {
-    var n = t.map(function (i) { return esc(names[i]); });
+  function gameHtml(t, names, repeat) {
+    var n = Scheduler.labels(t, names, repeat).map(esc);
     return '<b>' + n[0] + '</b> vs <b>' + n[1] + '</b>' + (n.length === 3 ? '<br>winner vs <b>' + n[2] + '</b>' : '');
   }
   function niceDate(s) { var d = Scheduler.parse(s); return Scheduler.MONTHS[d.getUTCMonth()].slice(0, 3) + ' ' + d.getUTCDate() + ', ' + d.getUTCFullYear(); }

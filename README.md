@@ -15,7 +15,8 @@ One file (`index.html`), no installs. Open it in any browser to use it, or put i
 ## Using it
 - Pick the season start and end dates and the number of teams, and rename teams if you want.
 - Add any extra days off, one per line, like `2026-10-31`. US federal holidays are skipped automatically.
+- **Allow teams to play more than once a week** (off by default): when off, each team plays only one day a week. When on, every Monday to Thursday play day gets a full game, and any team playing a 2nd (or later) time that week is marked with `*`, e.g. `Team 3*`. A legend explains the `*` under the calendar and list and at the bottom of the CSV. The Team summary shows each team's extra games.
 - Click **Make schedule**. Then **Print** it, or **Download spreadsheet (CSV)**. The CSV opens in Excel or Google Sheets.
 
 ## Testing (optional, for developers)
-`node test.js` checks the scheduling rules: Mon to Thu only, no holidays, no team twice in a week, and 2 or 3 teams per day.
+`node test.js` checks the scheduling rules: Mon to Thu only, no holidays, no team twice in a week, and 2 or 3 teams per day. With the option on, it checks that every play day has a game, that the `*` marks are correct, and that the CSV has the legend.
