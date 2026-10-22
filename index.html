@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>League Game Schedule Maker</title>
+<style>
+  :root { --blue:#1f5fa8; --light:#eef4fb; --line:#d6dde6; --text:#1d2733; --muted:#5b6b7c; --hol:#fff1e6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--text); background:#f7f9fc; line-height:1.4; }
+  header { background:var(--blue); color:#fff; padding:18px 20px; }
+  header h1 { margin:0; font-size:1.5rem; }
+  header p { margin:4px 0 0; opacity:.9; }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:1.2rem; color:var(--blue); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+  label { display:block; font-weight:600; margin-bottom:4px; }
+  .hint { font-weight:normal; color:var(--muted); font-size:.85rem; }
+  input, textarea { width:100%; padding:9px; font-size:1rem; border:1px solid #b9c4d0; border-radius:6px; font-family:inherit; }
+  textarea { min-height:90px; }
+  .teams { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; margin-top:8px; }
+  .teams input { padding:7px; font-size:.95rem; }
+  .buttons { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+  button { font-size:1rem; padding:10px 18px; border-radius:6px; border:1px solid var(--blue); background:#fff; color:var(--blue); cursor:pointer; font-weight:600; }
+  button.primary { background:var(--blue); color:#fff; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .msg { margin-top:10px; padding:10px; border-radius:6px; display:none; }
+  .msg.err { display:block; background:#fde8e8; color:#8a1c1c; }
+  .msg.info { display:block; background:var(--light); color:#18406e; }
+  .tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+  .tabs button { padding:7px 14px; font-size:.95rem; }
+  .tabs button.active { background:var(--blue); color:#fff; }
+  .month { margin-bottom:22px; page-break-inside:avoid; }
+  .month h3 { margin:0 0 6px; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:var(--light); }
+  .cal td { width:25%; height:78px; }
+  .cal .date { font-weight:700; font-size:.9rem; color:var(--muted); }
+  .cal .game { margin-top:3px; font-size:.92rem; }
+  .cal .game b { color:var(--blue); }
+  .cal td.out { background:#f1f3f6; }
+  .cal td.hol { background:var(--hol); }
+  .cal td.hol .note, .cal td.none .note { font-size:.8rem; color:#9a5a20; font-style:italic; }
+  .cal td.none .note { color:var(--muted); }
+  .scroll { overflow-x:auto; }
+  .matrix td, .matrix th { text-align:center; padding:4px 6px; font-size:.85rem; white-space:nowrap; }
+  .matrix td.self { background:#e9edf2; }
+  .matrix td.zero { color:#c0392b; font-weight:700; }
+  .stats { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+  .stat { background:var(--light); border-radius:8px; padding:8px 14px; }
+  .stat b { font-size:1.3rem; display:block; color:var(--blue); }
+  ul.skips { columns:2; margin:0; padding-left:20px; }
+  @media (max-width:600px) { ul.skips { columns:1; } .cal td { font-size:.8rem; padding:4px; height:auto; } header h1 { font-size:1.25rem; } }
+  @media print {
+    body { background:#fff; }
+    header, #setup, .tabs, .buttons, .noprint { display:none !important; }
+    main { max-width:none; padding:0; }
+    .card { border:none; padding:0; }
+    .view { display:block !important; page-break-before:always; }
+    .view:first-of-type { page-break-before:auto; }
+    .cal td.hol { background:#fff; }
+    th { background:#eee !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>League Game Schedule Maker</h1>
+  <p>Monday&ndash;Thursday play days &bull; one game sequence per day &bull; each team plays once a week</p>
+</header>
+<main>
+  <section class="card" id="setup">
+    <h2>1. Season setup</h2>
+    <div class="grid">
+      <div><label for="start">Season start date</label><input type="date" id="start"></div>
+      <div><label for="end">Season end date</label><input type="date" id="end"></div>
+      <div><label for="count">Number of teams <span class="hint">(2 to 40)</span></label><input type="number" id="count" min="2" max="40" value="6"></div>
+    </div>
+    <div style="margin-top:14px">
+      <label>Team names <span class="hint">(optional &ndash; type over to rename)</span></label>
+      <div class="teams" id="teams"></div>
+    </div>
+    <div style="margin-top:14px">
+      <label for="blackouts">Other days off <span class="hint">(optional &ndash; one date per line, like 2026-10-31. US federal holidays are skipped automatically.)</span></label>
+      <textarea id="blackouts" placeholder="Example:&#10;2026-10-31&#10;2026-11-27"></textarea>
+    </div>
+    <div class="buttons">
+      <button class="primary" id="gen">Make schedule</button>
+      <button id="print" disabled>Print</button>
+      <button id="csv" disabled>Download spreadsheet (CSV)</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </section>
+
+  <section class="card" id="results" style="display:none">
+    <h2>2. Your schedule</h2>
+    <div class="stats" id="stats"></div>
+    <div class="tabs noprint">
+      <button data-view="v-cal" class="active">Calendar</button>
+      <button data-view="v-list">List</button>
+      <button data-view="v-sum">Team summary</button>
+      <button data-view="v-skip">Days skipped</button>
+    </div>
+    <div class="view" id="v-cal"></div>
+    <div class="view" id="v-list" style="display:none"></div>
+    <div class="view" id="v-sum" style="display:none"></div>
+    <div class="view" id="v-skip" style="display:none"></div>
+  </section>
+</main>
+
+<!-- ===== Scheduling logic (no browser dependencies; also runs in Node for testing) ===== -->
+<script id="scheduler-logic">
+var Scheduler = (function () {
+  var DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  // All dates are handled as UTC midnight so daylight-saving time never shifts a day.
+  function parse(s) { var p = String(s).trim().split('-'); if (p.length !== 3) return null;
+    var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+    return isNaN(d) || d.getUTCDate() !== +p[2] ? null : d; }
+  function fmt(d) { return d.toISOString().slice(0, 10); }
+  function addDays(d, n) { return new Date(d.getTime() + n * 86400000); }
+  function nthWeekday(y, m, wd, n) { // n-th weekday (0=Sun) of month m (0-based); n=-1 means last
+    if (n > 0) { var d = new Date(Date.UTC(y, m, 1)); var off = (wd - d.getUTCDay() + 7) % 7; return addDays(d, off + (n - 1) * 7); }
+    var last = new Date(Date.UTC(y, m + 1, 0)); return addDays(last, -((last.getUTCDay() - wd + 7) % 7)); }
+  function observed(d) { var w = d.getUTCDay(); return w === 6 ? addDays(d, -1) : w === 0 ? addDays(d, 1) : d; }
+
+  // US federal holidays for one year, as { 'YYYY-MM-DD': name } using the observed (day-off) date.
+  function federalHolidays(y) {
+    var h = [];
+    function fixed(m, day, name) { var d = new Date(Date.UTC(y, m, day)); var o = observed(d);
+      h.push([o, name + (o.getTime() !== d.getTime() ? ' (observed)' : '')]); }
+    fixed(0, 1, "New Year's Day");
+    h.push([nthWeekday(y, 0, 1, 3), 'Martin Luther King Jr. Day']);
+    h.push([nthWeekday(y, 1, 1, 3), "Presidents' Day"]);
+    h.push([nthWeekday(y, 4, 1, -1), 'Memorial Day']);
+    if (y >= 2021) fixed(5, 19, 'Juneteenth');
+    fixed(6, 4, 'Independence Day');
+    h.push([nthWeekday(y, 8, 1, 1), 'Labor Day']);
+    h.push([nthWeekday(y, 9, 1, 2), 'Columbus Day']);
+    fixed(10, 11, 'Veterans Day');
+    h.push([nthWeekday(y, 10, 4, 4), 'Thanksgiving Day']);
+    fixed(11, 25, 'Christmas Day');
+    var out = {}; h.forEach(function (x) { out[fmt(x[0])] = x[1]; }); return out;
+  }
+  function holidaysBetween(start, end) {
+    var all = {};
+    // include neighbours: Jan 1 of next year can be observed on Dec 31
+    for (var y = start.getUTCFullYear() - 1; y <= end.getUTCFullYear() + 1; y++) {
+      var h = federalHolidays(y); for (var k in h) all[k] = h[k]; }
+    return all;
+  }
+
+  function combos(arr, k) { // all k-combinations of arr (arr is small: <= 40)
+    var res = [], cur = [];
+    (function rec(i) { if (cur.length === k) { res.push(cur.slice()); return; }
+      for (var j = i; j <= arr.length - (k - cur.length); j++) { cur.push(arr[j]); rec(j + 1); cur.pop(); } })(0);
+    return res;
+  }
+
+  /**
+   * opts: { start:'YYYY-MM-DD', end:'YYYY-MM-DD', teams:[names], blackouts:['YYYY-MM-DD',...] }
+   * Returns { games:[{date,dow,teams:[i,j,(k)]}], skipped:[{date,dow,reason}], played:[], waits:[], met:[[]], errors:[] }
+   */
+  function generate(opts) {
+    var errors = [];
+    var start = parse(opts.start), end = parse(opts.end), names = opts.teams || [];
+    var N = names.length;
+    if (!start) errors.push('Please choose a season start date.');
+    if (!end) errors.push('Please choose a season end date.');
+    if (start && end && end < start) errors.push('The end date must be on or after the start date.');
+    if (N < 2 || N > 40) errors.push('Number of teams must be between 2 and 40.');
+    var black = {}, badBlack = [];
+    (opts.blackouts || []).forEach(function (s) { s = String(s).trim(); if (!s) return;
+      var d = parse(s); if (d) black[fmt(d)] = true; else badBlack.push(s); });
+    if (badBlack.length) errors.push('These days-off entries are not valid dates (use YYYY-MM-DD): ' + badBlack.join(', '));
+    if (errors.length) return { errors: errors };
+
+    var hol = holidaysBetween(start, end);
+    var played = [], waits = [], last = [], met = [], dowCount = [];
+    for (var i = 0; i < N; i++) { played.push(0); waits.push(0); last.push(-1); met.push(new Array(N).fill(0)); dowCount.push([0, 0, 0, 0, 0, 0, 0]); }
+    var games = [], skipped = [];
+
+    // Walk week by week (Monday to Sunday)
+    var monday = addDays(start, -((start.getUTCDay() + 6) % 7)), weekNo = 0;
+    for (; monday <= end; monday = addDays(monday, 7), weekNo++) {
+      var days = [];
+      for (var off = 0; off < 4; off++) { // Mon..Thu
+        var d = addDays(monday, off), key = fmt(d);
+        if (d < start || d > end) continue;
+        if (hol[key]) { skipped.push({ date: key, dow: DAY_NAMES[d.getUTCDay()], reason: hol[key] }); continue; }
+        if (black[key]) { skipped.push({ date: key, dow: DAY_NAMES[d.getUTCDay()], reason: 'Day off (your list)' }); continue; }
+        days.push(d);
+      }
+      if (!days.length) continue;
+
+      // How many sequences this week and how big? Get as many teams playing as possible
+      // (max 3 per day), using the fewest days (so 3-team sequences are preferred).
+      var p = Math.min(N, 3 * days.length);
+      var g = Math.ceil(p / 3);
+      var sizes = []; for (var s = 0; s < g; s++) sizes.push(2);
+      for (var extra = p - 2 * g, s2 = 0; extra > 0; extra--, s2++) sizes[s2]++; // 3s first
+      // 1) Pick who plays this week: fewest games first, then whoever has waited longest.
+      var order0 = []; for (var t0 = 0; t0 < N; t0++) order0.push(t0);
+      order0.sort(function (a, b) { return played[a] - played[b] || last[a] - last[b] || a - b; });
+      var sel = order0.slice(0, p);
+
+      // 2) Split them into groups (one group per play day) so pairs that have met the least
+      //    end up together. Start greedy, then improve by swapping teams between groups.
+      function pairCost(m) { return Math.pow(4, m); } // repeat matchups get expensive fast
+      function groupCost(gr) { var c = 0; for (var a = 0; a < gr.length; a++) for (var b = a + 1; b < gr.length; b++) c += pairCost(met[gr[a]][gr[b]]); return c; }
+      var groups = [], left = sel.slice();
+      sizes.forEach(function (size) {
+        var best = null, bc = Infinity;
+        combos(left, size).forEach(function (c) { var v = groupCost(c); if (v < bc) { bc = v; best = c; } });
+        groups.push(best); left = left.filter(function (x) { return best.indexOf(x) < 0; });
+      });
+      for (var improved = true, guard = 0; improved && guard < 200; guard++) {
+        improved = false;
+        for (var g1 = 0; g1 < groups.length; g1++) for (var g2 = g1 + 1; g2 < groups.length; g2++)
+          for (var i1 = 0; i1 < groups[g1].length; i1++) for (var i2 = 0; i2 < groups[g2].length; i2++) {
+            var A = groups[g1], B = groups[g2], before = groupCost(A) + groupCost(B);
+            var A2 = A.slice(), B2 = B.slice(); A2[i1] = B[i2]; B2[i2] = A[i1];
+            if (groupCost(A2) + groupCost(B2) < before - 1e-9) { groups[g1] = A2; groups[g2] = B2; improved = true; }
+          }
+      }
+
+      // 3) Put groups on days so each team rotates through Mon/Tue/Wed/Thu.
+      var dayOf = []; var freeGroups = groups.slice();
+      for (var di = 0; di < days.length && freeGroups.length; di++) {
+        var wd = days[di].getUTCDay(), bi = 0, bv = Infinity;
+        freeGroups.forEach(function (gr, idx) { var v = 0; gr.forEach(function (t) { v += dowCount[t][wd]; }); if (v < bv) { bv = v; bi = idx; } });
+        dayOf[di] = freeGroups.splice(bi, 1)[0];
+      }
+
+      days.forEach(function (d, di) {
+        var key = fmt(d), dow = DAY_NAMES[d.getUTCDay()], best = dayOf[di];
+        if (!best) { skipped.push({ date: key, dow: dow, reason: 'No game needed (all teams already play this week)' }); return; }
+        if (best.length < 2) { skipped.push({ date: key, dow: dow, reason: 'Fewer than 2 teams available' }); return; }
+
+        // Order the group: who waits for the winner (3rd slot)? The one who has waited least,
+        // then the choice whose first game (A vs B) is the rarer matchup.
+        var order = best.slice().sort(function (a, b) { return a - b; });
+        if (best.length === 3) {
+          var bestO = null, bestOS = null;
+          for (var w = 0; w < 3; w++) {
+            var c3 = order[w], ab = order.filter(function (x) { return x !== c3; });
+            var sc = [waits[c3], met[ab[0]][ab[1]], c3];
+            if (!bestOS || less(sc, bestOS)) { bestOS = sc; bestO = [ab[0], ab[1], c3]; }
+          }
+          order = bestO; waits[order[2]]++;
+        }
+        for (var a2 = 0; a2 < order.length; a2++) {
+          played[order[a2]]++; last[order[a2]] = weekNo; dowCount[order[a2]][d.getUTCDay()]++;
+          for (var b2 = a2 + 1; b2 < order.length; b2++) { met[order[a2]][order[b2]]++; met[order[b2]][order[a2]]++; }
+        }
+        games.push({ date: key, dow: dow, week: weekNo, teams: order });
+      });
+    }
+    skipped.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    return { errors: [], games: games, skipped: skipped, played: played, waits: waits, met: met, names: names };
+  }
+  function less(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] < b[i]; } return false; }
+
+  function describe(teamIdx, names) {
+    var n = teamIdx.map(function (i) { return names[i]; });
+    return n.length === 3 ? n[0] + ' vs ' + n[1] + ', winner vs ' + n[2] : n[0] + ' vs ' + n[1];
+  }
+  function csvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function toCSV(result) {
+    var rows = [['Day of Week', 'Date', 'Team 1', 'Team 2', 'Team 3']];
+    result.games.forEach(function (g) { rows.push([g.dow, g.date].concat(g.teams.map(function (i) { return result.names[i]; })).concat(g.teams.length < 3 ? [''] : [])); });
+    return rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+  }
+
+  return { generate: generate, describe: describe, toCSV: toCSV, federalHolidays: federalHolidays,
+           parse: parse, fmt: fmt, addDays: addDays, DAY_NAMES: DAY_NAMES, MONTHS: MONTHS };
+})();
+if (typeof module !== 'undefined' && module.exports) module.exports = Scheduler;
+</script>
+
+<!-- ===== Page interface ===== -->
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var lastResult = null;
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  // Default season: today through ~3 months
+  var today = new Date(); var t = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  $('start').value = Scheduler.fmt(t); $('end').value = Scheduler.fmt(Scheduler.addDays(t, 91));
+
+  var saved = [];
+  function renderTeamInputs() {
+    var box = $('teams'); box.querySelectorAll('input').forEach(function (inp, i) { saved[i] = inp.value; });
+    var n = Math.max(2, Math.min(40, parseInt($('count').value, 10) || 2));
+    var html = '';
+    for (var i = 0; i < n; i++) html += '<input type="text" aria-label="Team ' + (i + 1) + ' name" value="' + esc(saved[i] != null ? saved[i] : 'Team ' + (i + 1)) + '">';
+    box.innerHTML = html;
+  }
+  $('count').addEventListener('input', renderTeamInputs);
+  renderTeamInputs();
+
+  function showMsg(text, kind) { var m = $('msg'); m.className = 'msg ' + (kind || ''); m.innerHTML = text; }
+
+  $('gen').addEventListener('click', function () {
+    var n = parseInt($('count').value, 10);
+    if (!(n >= 2 && n <= 40)) { showMsg('Number of teams must be between 2 and 40.', 'err'); return; }
+    var names = [], seen = {};
+    $('teams').querySelectorAll('input').forEach(function (inp, i) {
+      var v = inp.value.trim() || 'Team ' + (i + 1); if (seen[v]) v = v + ' (' + (i + 1) + ')'; seen[v] = 1; names.push(v); });
+    var res = Scheduler.generate({ start: $('start').value, end: $('end').value, teams: names.slice(0, n),
+      blackouts: $('blackouts').value.split(/\r?\n/) });
+    if (res.errors.length) { showMsg(res.errors.map(esc).join('<br>'), 'err'); return; }
+    lastResult = res;
+    var notes = [];
+    if (!res.games.length) notes.push('No games could be scheduled in these dates. Try a longer season.');
+    if (n > 12) notes.push('With ' + n + ' teams, at most 12 teams can play in a week (4 days &times; 3 teams), so some teams sit out each week. Sitting out rotates to the teams that have played the fewest games.');
+    showMsg(notes.length ? notes.join('<br>') : 'Schedule made: ' + res.games.length + ' game days.', 'info');
+    render(res);
+    $('print').disabled = $('csv').disabled = false;
+    $('results').style.display = '';
+  });
+
+  function render(res) {
+    var names = res.names, gameBy = {}, skipBy = {};
+    res.games.forEach(function (g) { gameBy[g.date] = g; });
+    res.skipped.forEach(function (s) { skipBy[s.date] = s; });
+    var minP = Math.min.apply(null, res.played), maxP = Math.max.apply(null, res.played);
+    $('stats').innerHTML = '<div class="stat"><b>' + res.games.length + '</b>game days</div>' +
+      '<div class="stat"><b>' + names.length + '</b>teams</div>' +
+      '<div class="stat"><b>' + (minP === maxP ? minP : minP + '&ndash;' + maxP) + '</b>games per team</div>' +
+      '<div class="stat"><b>' + res.skipped.filter(function (s) { return !/No game|Fewer/.test(s.reason); }).length + '</b>holidays / days off skipped</div>';
+
+    // Calendar: one table per month, columns Mon-Thu, rows = weeks
+    var start = Scheduler.parse($('start').value), end = Scheduler.parse($('end').value), html = '';
+    var cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+    while (cur <= end) {
+      var y = cur.getUTCFullYear(), m = cur.getUTCMonth();
+      html += '<div class="month"><h3>' + Scheduler.MONTHS[m] + ' ' + y + '</h3><table class="cal"><thead><tr><th>Monday</th><th>Tuesday</th><th>Wednesday</th><th>Thursday</th></tr></thead><tbody>';
+      var first = cur, mon = Scheduler.addDays(first, -((first.getUTCDay() + 6) % 7));
+      var lastDay = new Date(Date.UTC(y, m + 1, 0));
+      for (; mon <= lastDay; mon = Scheduler.addDays(mon, 7)) {
+        var row = '', any = false;
+        for (var k = 0; k < 4; k++) {
+          var d = Scheduler.addDays(mon, k), key = Scheduler.fmt(d);
+          if (d.getUTCMonth() !== m) { row += '<td class="out"></td>'; continue; }
+          any = true;
+          var inSeason = d >= start && d <= end, cell = '<div class="date">' + Scheduler.DAY_NAMES[d.getUTCDay()].slice(0, 3) + ' ' + (m + 1) + '/' + d.getUTCDate() + '</div>';
+          if (gameBy[key]) row += '<td>' + cell + '<div class="game">' + gameHtml(gameBy[key].teams, names) + '</div></td>';
+          else if (skipBy[key] && !/No game|Fewer/.test(skipBy[key].reason)) row += '<td class="hol">' + cell + '<div class="note">' + esc(skipBy[key].reason) + '</div></td>';
+          else if (inSeason) row += '<td class="none">' + cell + '<div class="note">No game</div></td>';
+          else row += '<td class="out">' + cell + '</td>';
+        }
+        if (any) html += '<tr>' + row + '</tr>';
+      }
+      html += '</tbody></table></div>';
+      cur = new Date(Date.UTC(y, m + 1, 1));
+    }
+    $('v-cal').innerHTML = html;
+
+    // List
+    var list = '<div class="scroll"><table><thead><tr><th>Day</th><th>Date</th><th>Game sequence</th></tr></thead><tbody>';
+    res.games.forEach(function (g) { list += '<tr><td>' + g.dow + '</td><td>' + niceDate(g.date) + '</td><td>' + esc(Scheduler.describe(g.teams, names)) + '</td></tr>'; });
+    $('v-list').innerHTML = list + '</tbody></table></div>';
+
+    // Summary
+    var sum = '<h3>Games per team</h3><div class="scroll"><table><thead><tr><th>Team</th><th>Game days</th><th>Times waiting for the winner (3rd spot)</th></tr></thead><tbody>';
+    names.forEach(function (n, i) { sum += '<tr><td>' + esc(n) + '</td><td>' + res.played[i] + '</td><td>' + res.waits[i] + '</td></tr>'; });
+    sum += '</tbody></table></div><h3 style="margin-top:18px">Matchups</h3><p class="hint">How many times each pair of teams is scheduled in the same game sequence. Red 0 = never scheduled together.</p><div class="scroll"><table class="matrix"><thead><tr><th></th>';
+    names.forEach(function (n, i) { sum += '<th title="' + esc(n) + '">' + (i + 1) + '</th>'; });
+    sum += '</tr></thead><tbody>';
+    names.forEach(function (n, i) {
+      sum += '<tr><th style="text-align:left">' + (i + 1) + '. ' + esc(n) + '</th>';
+      names.forEach(function (_, j) { var v = res.met[i][j]; sum += i === j ? '<td class="self">&ndash;</td>' : '<td' + (v === 0 ? ' class="zero"' : '') + '>' + v + '</td>'; });
+      sum += '</tr>';
+    });
+    $('v-sum').innerHTML = sum + '</tbody></table></div>';
+
+    // Skipped
+    var hol = res.skipped.filter(function (s) { return !/No game|Fewer/.test(s.reason); });
+    var sk = '<h3>Holidays and days off skipped (Mon&ndash;Thu only)</h3>';
+    sk += hol.length ? '<ul class="skips">' + hol.map(function (s) { return '<li>' + s.dow + ', ' + niceDate(s.date) + ' &ndash; ' + esc(s.reason) + '</li>'; }).join('') + '</ul>' : '<p>None in this season.</p>';
+    var other = res.skipped.filter(function (s) { return /No game|Fewer/.test(s.reason); });
+    if (other.length) sk += '<h3 style="margin-top:16px">Play days with no game</h3><p class="hint">Every team already had its one game that week, so no game was needed.</p><ul class="skips">' + other.map(function (s) { return '<li>' + s.dow + ', ' + niceDate(s.date) + '</li>'; }).join('') + '</ul>';
+    $('v-skip').innerHTML = sk;
+  }
+  function gameHtml(t, names) {
+    var n = t.map(function (i) { return esc(names[i]); });
+    return '<b>' + n[0] + '</b> vs <b>' + n[1] + '</b>' + (n.length === 3 ? '<br>winner vs <b>' + n[2] + '</b>' : '');
+  }
+  function niceDate(s) { var d = Scheduler.parse(s); return Scheduler.MONTHS[d.getUTCMonth()].slice(0, 3) + ' ' + d.getUTCDate() + ', ' + d.getUTCFullYear(); }
+
+  document.querySelectorAll('.tabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.tabs button').forEach(function (x) { x.classList.toggle('active', x === b); });
+      document.querySelectorAll('.view').forEach(function (v) { v.style.display = v.id === b.dataset.view ? '' : 'none'; });
+    });
+  });
+  $('print').addEventListener('click', function () { window.print(); });
+  $('csv').addEventListener('click', function () {
+    if (!lastResult) return;
+    var blob = new Blob(['\ufeff' + Scheduler.toCSV(lastResult)], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'game-schedule-' + $('start').value + '-to-' + $('end').value + '.csv';
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  });
+})();
+</script>
+</body>
+</html>
